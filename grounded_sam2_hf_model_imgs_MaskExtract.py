@@ -11,11 +11,25 @@ from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection 
 
+"""
+Hyper parameters
+"""
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--path', type=str, required=True, help='input your path')
+parser.add_argument('--text', type=str, default="foreground object.", help='input your text')
+args = parser.parse_args()
+
+PATH = args.path
+TEXT = args.text
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+GROUNDING_MODEL = "IDEA-Research/grounding-dino-tiny"
+
 # environment settings
 # use bfloat16
-torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
-
-if torch.cuda.get_device_properties(0).major >= 8:
+torch.autocast(device_type=DEVICE, dtype=torch.bfloat16).__enter__()
+if DEVICE == "cuda" and torch.cuda.get_device_properties(0).major >= 8:
     # turn on tfloat32 for Ampere GPUs (https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
@@ -23,29 +37,16 @@ if torch.cuda.get_device_properties(0).major >= 8:
 # build SAM2 image predictor
 sam2_checkpoint = "./checkpoints/sam2_hiera_large.pt"
 model_cfg = "sam2_hiera_l.yaml"
-sam2_model = build_sam2(model_cfg, sam2_checkpoint, device="cuda")
+sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=DEVICE)
 sam2_predictor = SAM2ImagePredictor(sam2_model)
 
 # build grounding dino from huggingface
-model_id = "IDEA-Research/grounding-dino-tiny"
-device = "cuda" if torch.cuda.is_available() else "cpu"
-processor = AutoProcessor.from_pretrained(model_id)
-grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(device)
-
+processor = AutoProcessor.from_pretrained(GROUNDING_MODEL)
+grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(GROUNDING_MODEL).to(DEVICE)
 
 # setup the input image and text prompt for SAM 2 and Grounding DINO
-# VERY important: text queries need to be lowercased + end with a dot
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--path', type=str, required=True, help='input your path')
-parser.add_argument('--text', type=str, default="foreground object.", help='input your text')
-args = parser.parse_args()
-path = args.path
-
-text = args.text
-# scene = "BlackBunny"
-img_path = f'{path}/images/'
-save_path = f'{path}/'
+img_path = f'{PATH}/images/'
+save_path = f'{PATH}/'
 annotated_path = os.path.join(save_path, "annotated")
 mask_path = os.path.join(save_path, "masks")
 if not os.path.exists(annotated_path):
@@ -63,7 +64,7 @@ for idx, img_name in tqdm(enumerate([img_name for img_name in Images if img_name
 
     sam2_predictor.set_image(np.array(image.convert("RGB")))
 
-    inputs = processor(images=image, text=text, return_tensors="pt").to(device)
+    inputs = processor(images=image, text=TEXT, return_tensors="pt").to(DEVICE)
     with torch.no_grad():
         outputs = grounding_model(**inputs)
 
